@@ -14,16 +14,15 @@ import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import org.eclipse.jetty.websocket.client.ClientUpgradeRequest;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.lang.invoke.MethodHandles;
 import java.net.URI;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,9 +66,9 @@ public class RosBridge {
     protected Session session;
 
     protected Map<String, RosBridgeSubscriber> listeners = new ConcurrentHashMap<String, RosBridge.RosBridgeSubscriber>();
-    protected Set<String> publishedTopics = new HashSet<String>();
+    protected Set<String> publishedTopics = new CopyOnWriteArraySet<>();
 
-    protected Map<String, FragmentManager> fragementManagers = new HashMap<String, FragmentManager>();
+    protected Map<String, FragmentManager> fragmentManagers = new ConcurrentHashMap<>();
 
     protected boolean hasConnected = false;
 
@@ -332,7 +331,7 @@ public class RosBridge {
             this.listeners.put(topic, new RosBridgeSubscriber(delegate));
         }
 
-       final String subMsg = request.generateJsonString();
+        final String subMsg = request.generateJsonString();
 
         try {
             final Future<Void> fut = session.getRemote().sendStringByFuture(subMsg);
@@ -389,7 +388,7 @@ public class RosBridge {
         if (!advertised) {
 
             //then start advertising first
-           final String adMsg = "{" +
+            final String adMsg = "{" +
                     "\"op\": \"advertise\",\n" +
                     "\"topic\": \"" + topic + "\",\n" +
                     "\"type\": \"" + type + "\"\n" +
@@ -429,7 +428,7 @@ public class RosBridge {
                 "}";
 
         try {
-           final  Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending unsubscribe message for " + topic;
@@ -462,14 +461,14 @@ public class RosBridge {
             throw new RuntimeException("Rosbridge connection is closed. Cannot unadvertise. Attempted unadvertise topic: " + topic);
         }
 
-       final String usMsg = "{" +
+        final String usMsg = "{" +
                 "\"op\": \"unadvertise\",\n" +
                 "\"topic\": \"" + topic + "\"\n" +
                 "}";
 
 
         try {
-           final Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending unsubscribe message for " + topic;
@@ -573,7 +572,7 @@ public class RosBridge {
 
 
         try {
-           final Future<Void> fut = session.getRemote().sendStringByFuture(fullMsg);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(fullMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error publishing to " + topic + " with message type: " + type;
@@ -644,31 +643,16 @@ public class RosBridge {
     }
 
 
-    protected void processFragment(JsonNode node) {
+    protected void processFragment(final JsonNode node) {
         final String id = node.get("id").textValue();
-        FragmentManager manager;
-        boolean complete = false;
-        String fullMsg = null;
-        synchronized (this.fragementManagers) {
-            manager = this.fragementManagers.get(id);
-            if (manager == null) {
-                manager = new FragmentManager(node);
-                this.fragementManagers.put(id, manager);
-            }
-        }
-        synchronized (manager) {
-            complete = manager.updateFragment(node);
-            if (complete)
-                fullMsg = manager.generateFullMessage();
-        }
-
+        final FragmentManager manager = this.fragmentManagers.computeIfAbsent(id, key -> new FragmentManager(node));
+        final boolean complete = manager.updateFragment(node);
         if (complete) {
-            synchronized (this.fragementManagers) {
-                this.fragementManagers.remove(id);
-            }
+            final String fullMsg = manager.generateFullMessage();
+            this.fragmentManagers.remove(id);
+            manager.close();
             this.onMessage(fullMsg);
         }
-
     }
 
     /**
@@ -736,53 +720,58 @@ public class RosBridge {
 
     }
 
-    public static class FragmentManager {
+    private static final class FragmentManager implements Closeable {
 
-        protected String id;
-        protected String[] fragments;
-        protected Set<Integer> completedFragements;
+        private final String id;
+        private final int fragmentsNumber;
+        private final AtomicReferenceArray<String> fragments;
+        private final CopyOnWriteArraySet<Integer> completedFragments = new CopyOnWriteArraySet<>();
 
-        public FragmentManager(JsonNode fragmentJson) {
-            int total = fragmentJson.get("total").intValue();
-            this.fragments = new String[total];
-            this.completedFragements = new HashSet<Integer>(total);
+        public FragmentManager(final JsonNode fragmentJson) {
+            this.fragmentsNumber = fragmentJson.get("total").intValue();
+            this.fragments = new AtomicReferenceArray<>(this.fragmentsNumber);
             this.id = fragmentJson.get("id").textValue();
         }
 
-        public boolean updateFragment(JsonNode fragmentJson) {
-            String data = fragmentJson.get("data").asText();
-            int num = fragmentJson.get("num").intValue();
-            this.fragments[num] = data;
-            completedFragements.add(num);
+        public final boolean updateFragment(final JsonNode fragmentJson) {
+            final String data = fragmentJson.get("data").asText();
+            final int num = fragmentJson.get("num").intValue();
+            this.fragments.set(num, data);
+            this.completedFragments.add(num);
             return this.complete();
         }
 
-        public boolean complete() {
-            return this.completedFragements.size() == fragments.length;
+        public final boolean complete() {
+            return this.completedFragments.size() == this.fragmentsNumber;
         }
 
-        public int numFragments() {
-            return this.fragments.length;
-        }
 
-        public int numCompletedFragments() {
-            return this.completedFragements.size();
-        }
-
-        public String generateFullMessage() {
+        public final String generateFullMessage() {
             if (!this.complete()) {
                 throw new RuntimeException("Cannot generate full message from fragments, because not all fragments have arrived.");
             }
 
-            StringBuilder buf = new StringBuilder(fragments[0].length() * fragments.length);
-            for (String frag : this.fragments) {
-                buf.append(frag);
+            final StringBuilder buf = new StringBuilder(fragments.get(0).length() * this.fragmentsNumber);
+            
+            for (int i = 0; i < fragmentsNumber; i++) {
+                final String fragment = this.fragments.get(i);
+                buf.append(fragment);
             }
 
             return buf.toString();
-
         }
 
+        /**
+         * Clear collections
+         */
+        @Override
+        public final void close() {
+            try {
+                this.completedFragments.clear();
+            } catch (final Exception exception) {
+                LOGGER.debug(ExceptionUtils.getStackTrace(exception));
+            }
+        }
     }
 
 }
