@@ -3,6 +3,11 @@ package ros.tools;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.lang.invoke.MethodHandles;
 
 /**
  * This is a helper class that may be used for taking a JSON message returned from Ros bridge, and unpacking
@@ -21,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * @author James MacGlashan.
  */
 public class MessageUnpacker <T> {
+	static final Logger LOGGER = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 	protected ObjectMapper mapper = new ObjectMapper();
 	protected Class<?> javaClass;
 
@@ -53,8 +59,9 @@ public class MessageUnpacker <T> {
 		T rosMsg = null;
 		try {
 			rosMsg = (T)mapper.treeToValue(rosMsgNode, javaClass);
-		} catch(JsonProcessingException e) {
-			e.printStackTrace();
+		} catch(final JsonProcessingException jsonProcessingException) {
+			LOGGER.error(ExceptionUtils.getStackTrace(jsonProcessingException));
+			throw new RuntimeException(jsonProcessingException);
 		}
 		return rosMsg;
 	}

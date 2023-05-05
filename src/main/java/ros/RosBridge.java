@@ -94,26 +94,12 @@ public class RosBridge {
 
 
     /**
-     * Connects to the Rosbridge host at the provided URI.
+     * Connects to the Rosbridge host at the provided URI. Does not wait for connection.
      *
      * @param rosBridgeURI the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
      */
-    public void connect(String rosBridgeURI) {
-        WebSocketClient client = new WebSocketClient();
-        try {
-            client.start();
-            URI echoUri = new URI(rosBridgeURI);
-            ClientUpgradeRequest request = new ClientUpgradeRequest();
-            client.connect(this, echoUri, request);
-            if(LOGGER.isTraceEnabled()){
-                final String msg=String.format("Connecting to : %s%n", echoUri);
-                LOGGER.trace(msg);
-            }
-
-
-        } catch (final Throwable throwable) {
-            LOGGER.error(ExceptionUtils.getStackTrace(throwable));
-        }
+    public void connect(final String rosBridgeURI) {
+        this.connect(rosBridgeURI, false);
     }
 
     /**
@@ -123,15 +109,15 @@ public class RosBridge {
      * @param waitForConnection if true, then this method will block until the connection is established. If false, then return immediately.
      */
     public void connect(String rosBridgeURI, boolean waitForConnection) {
-        WebSocketClient client = new WebSocketClient();
+        final WebSocketClient client = new WebSocketClient();
         try {
             client.start();
-            URI echoUri = new URI(rosBridgeURI);
-            ClientUpgradeRequest request = new ClientUpgradeRequest();
+            final URI echoUri = new URI(rosBridgeURI);
+            final ClientUpgradeRequest request = new ClientUpgradeRequest();
             client.connect(this, echoUri, request);
 
-            if(LOGGER.isTraceEnabled()){
-                final String msg=String.format("Connecting to : %s%n", echoUri);
+            if (LOGGER.isTraceEnabled()) {
+                final String msg = String.format("Connecting to : %s%n", echoUri);
                 LOGGER.trace(msg);
             }
 
@@ -141,6 +127,7 @@ public class RosBridge {
 
         } catch (final Throwable throwable) {
             LOGGER.error(ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
     }
@@ -183,18 +170,18 @@ public class RosBridge {
 
 
     /**
-     * Returns whether ROSBridge will print all ROSBridge messages as they are received to the command line.
+     * Returns whether ROSBridge will log all ROSBridge messages as they are received to the command line.
      *
-     * @return if true, then ROSBridge will print all ROSBridge messages as they are received to the command line. Otherwise is silent.
+     * @return if true, then ROSBridge will log all ROSBridge messages as they are received to the command line. Otherwise is silent.
      */
-    public boolean printMessagesAsReceived() {
+    public boolean logMessagesAsReceived() {
         return logMessagesAsReceived;
     }
 
     /**
-     * Sets whether ROSBridge should print all ROSBridge messages as they are received to the command.
+     * Sets whether ROSBridge should log all ROSBridge messages as they are received to the command.
      *
-     * @param logMessagesAsReceived if true, then ROSBridge will print all ROSBridge messages as they are received to the command line. Otherwise is silent.
+     * @param logMessagesAsReceived if true, then ROSBridge will log all ROSBridge messages as they are received to the command line. Otherwise is silent.
      */
     public void setLogMessagesAsReceived(boolean logMessagesAsReceived) {
         this.logMessagesAsReceived = logMessagesAsReceived;
@@ -226,8 +213,8 @@ public class RosBridge {
     @OnWebSocketClose
     public void onClose(int statusCode, String reason) {
 
-        if(LOGGER.isTraceEnabled()){
-            final String msg=String.format("Connection closed: %d - %s%n", statusCode, reason);
+        if (LOGGER.isTraceEnabled()) {
+            final String msg = String.format("Connection closed: %d - %s%n", statusCode, reason);
             LOGGER.trace(msg);
         }
 
@@ -237,8 +224,8 @@ public class RosBridge {
 
     @OnWebSocketConnect
     public void onConnect(Session session) {
-        if(LOGGER.isTraceEnabled()){
-            final String msg=String.format("Got connect for ros: %s%n", session);
+        if (LOGGER.isTraceEnabled()) {
+            final String msg = String.format("Got connect for ros: %s%n", session);
             LOGGER.trace(msg);
         }
         this.session = session;
@@ -276,6 +263,7 @@ public class RosBridge {
         } catch (final IOException ioException) {
             final String errorMsg = "Could not parse ROSBridge web socket message into JSON data";
             LOGGER.error(errorMsg + " " + ExceptionUtils.getStackTrace(ioException));
+            throw new RuntimeException(ioException);
         }
 
 
@@ -330,7 +318,7 @@ public class RosBridge {
             throw new RuntimeException("Rosbridge connection is closed. Cannot subscribe.");
         }
 
-        String topic = request.getTopic();
+        final String topic = request.getTopic();
 
         //already have a subscription? just update delegate
         synchronized (this.listeners) {
@@ -344,14 +332,15 @@ public class RosBridge {
             this.listeners.put(topic, new RosBridgeSubscriber(delegate));
         }
 
-        String subMsg = request.generateJsonString();
-        Future<Void> fut;
+       final String subMsg = request.generateJsonString();
+
         try {
-            fut = session.getRemote().sendStringByFuture(subMsg);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(subMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending subscription message to Rosbridge host for topic " + topic;
             LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
 
@@ -366,7 +355,7 @@ public class RosBridge {
      */
     public void removeListener(String topic, RosListenDelegate delegate) {
 
-        RosBridgeSubscriber subscriber = this.listeners.get(topic);
+        final RosBridgeSubscriber subscriber = this.listeners.get(topic);
         if (subscriber != null) {
             subscriber.removeDelegate(delegate);
 
@@ -388,7 +377,7 @@ public class RosBridge {
     public void advertise(String topic, String type) {
 
         if (this.session == null) {
-            throw new RuntimeException("Rosbridge connection is closed. Cannot advertise. Attempted Topic advertising: " + topic);
+            throw new RuntimeException("Rosbridge connection is closed. Cannot advertise topic: " + topic);
         }
 
         boolean advertised = false;
@@ -400,20 +389,21 @@ public class RosBridge {
         if (!advertised) {
 
             //then start advertising first
-            String adMsg = "{" +
+           final String adMsg = "{" +
                     "\"op\": \"advertise\",\n" +
                     "\"topic\": \"" + topic + "\",\n" +
                     "\"type\": \"" + type + "\"\n" +
                     "}";
 
-            Future<Void> fut;
+
             try {
-                fut = session.getRemote().sendStringByFuture(adMsg);
+                final Future<Void> fut = session.getRemote().sendStringByFuture(adMsg);
                 fut.get(2, TimeUnit.SECONDS);
             } catch (final Throwable throwable) {
                 this.publishedTopics.remove(topic);
                 final String msg = "Error in setting up advertisement to " + topic + " with message type: " + type;
                 LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
+                throw new RuntimeException(throwable);
             }
 
         }
@@ -433,14 +423,13 @@ public class RosBridge {
             throw new RuntimeException("Rosbridge connection is closed. Cannot unsubscribe. Attempted unsubscribe topic: " + topic);
         }
 
-        String usMsg = "{" +
+        final String usMsg = "{" +
                 "\"op\": \"unsubscribe\",\n" +
                 "\"topic\": \"" + topic + "\"\n" +
                 "}";
 
-        Future<Void> fut;
         try {
-            fut = session.getRemote().sendStringByFuture(usMsg);
+           final  Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending unsubscribe message for " + topic;
@@ -455,8 +444,8 @@ public class RosBridge {
      * Unsubscribes from all topics.
      */
     public void unsubscribeAll() {
-        List<String> curTopics = new ArrayList<String>(this.listeners.keySet());
-        for (String topic : curTopics) {
+        final List<String> curTopics = new ArrayList<String>(this.listeners.keySet());
+        for (final String topic : curTopics) {
             this.unsubscribe(topic);
         }
     }
@@ -473,18 +462,19 @@ public class RosBridge {
             throw new RuntimeException("Rosbridge connection is closed. Cannot unadvertise. Attempted unadvertise topic: " + topic);
         }
 
-        String usMsg = "{" +
+       final String usMsg = "{" +
                 "\"op\": \"unadvertise\",\n" +
                 "\"topic\": \"" + topic + "\"\n" +
                 "}";
 
-        Future<Void> fut;
+
         try {
-            fut = session.getRemote().sendStringByFuture(usMsg);
+           final Future<Void> fut = session.getRemote().sendStringByFuture(usMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending unsubscribe message for " + topic;
             LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
         synchronized (this.publishedTopics) {
@@ -501,7 +491,7 @@ public class RosBridge {
         synchronized (this.publishedTopics) {
             curPublishedTopics = new ArrayList<String>(this.publishedTopics);
         }
-        for (String topic : curPublishedTopics) {
+        for (final String topic : curPublishedTopics) {
             this.unadvertise(topic);
         }
     }
@@ -529,32 +519,34 @@ public class RosBridge {
 
         this.advertise(topic, type);
 
-        Map<String, Object> jsonMsg = new HashMap<String, java.lang.Object>();
+        final Map<String, Object> jsonMsg = new HashMap<String, java.lang.Object>();
         jsonMsg.put("op", "publish");
         jsonMsg.put("topic", topic);
         jsonMsg.put("type", type);
         jsonMsg.put("msg", msg);
 
-        JsonFactory jsonFactory = new JsonFactory();
-        StringWriter writer = new StringWriter();
-        JsonGenerator jsonGenerator;
-        ObjectMapper objectMapper = new ObjectMapper();
+        final JsonFactory jsonFactory = new JsonFactory();
+        final StringWriter writer = new StringWriter();
+        final JsonGenerator jsonGenerator;
+        final ObjectMapper objectMapper = new ObjectMapper();
 
         try {
             jsonGenerator = jsonFactory.createGenerator(writer);
             objectMapper.writeValue(jsonGenerator, jsonMsg);
         } catch (final Exception exception) {
-            LOGGER.error( ExceptionUtils.getStackTrace(exception));
+            LOGGER.error(ExceptionUtils.getStackTrace(exception));
+            throw new RuntimeException(exception);
         }
 
-        String jsonMsgString = writer.toString();
-        Future<Void> fut;
+        final String jsonMsgString = writer.toString();
+
         try {
-            fut = session.getRemote().sendStringByFuture(jsonMsgString);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(jsonMsgString);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String errorMsg = "Error publishing to " + topic + " with message type: " + type;
             LOGGER.error(errorMsg + " " + ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
     }
@@ -576,13 +568,12 @@ public class RosBridge {
 
         this.advertise(topic, type);
 
-        String fullMsg = "{\"op\": \"publish\", \"topic\": \"" + topic + "\", \"type\": \"" + type + "\", " +
+        final String fullMsg = "{\"op\": \"publish\", \"topic\": \"" + topic + "\", \"type\": \"" + type + "\", " +
                 "\"msg\": " + jsonMsg + "}";
 
 
-        Future<Void> fut;
         try {
-            fut = session.getRemote().sendStringByFuture(fullMsg);
+           final Future<Void> fut = session.getRemote().sendStringByFuture(fullMsg);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error publishing to " + topic + " with message type: " + type;
@@ -605,13 +596,14 @@ public class RosBridge {
             throw new RuntimeException("Rosbridge connection is closed. Cannot send message.");
         }
 
-        Future<Void> fut;
+
         try {
-            fut = session.getRemote().sendStringByFuture(message);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(message);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error sending raw message to RosBridge server: " + message;
             LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
     }
@@ -624,10 +616,10 @@ public class RosBridge {
      */
     public void formatAndSend(Object o) {
 
-        JsonFactory jsonFactory = new JsonFactory();
-        StringWriter writer = new StringWriter();
-        JsonGenerator jsonGenerator;
-        ObjectMapper objectMapper = new ObjectMapper();
+        final JsonFactory jsonFactory = new JsonFactory();
+        final StringWriter writer = new StringWriter();
+        final JsonGenerator jsonGenerator;
+        final ObjectMapper objectMapper = new ObjectMapper();
 
         try {
             jsonGenerator = jsonFactory.createGenerator(writer);
@@ -635,23 +627,25 @@ public class RosBridge {
         } catch (final Exception exception) {
             final String msg = "Error parsing object into a JSON message.";
             LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(exception));
+            throw new RuntimeException(exception);
         }
 
-        String jsonMsgString = writer.toString();
-        Future<Void> fut;
+        final String jsonMsgString = writer.toString();
+
         try {
-            fut = session.getRemote().sendStringByFuture(jsonMsgString);
+            final Future<Void> fut = session.getRemote().sendStringByFuture(jsonMsgString);
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error sending message to RosBridge server: " + jsonMsgString;
             LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
+            throw new RuntimeException(throwable);
         }
 
     }
 
 
     protected void processFragment(JsonNode node) {
-        String id = node.get("id").textValue();
+        final String id = node.get("id").textValue();
         FragmentManager manager;
         boolean complete = false;
         String fullMsg = null;

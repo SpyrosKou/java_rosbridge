@@ -5,8 +5,12 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,7 +33,7 @@ import java.util.Map;
  * @author James MacGlashan.
  */
 public interface RosListenDelegate {
-
+	static final Logger LOGGER = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 	/**
 	 * Receives a new published message to a subscribed topic. The JSON data, given as a {@link com.fasterxml.jackson.databind.JsonNode}, has four top-level fields:<p>
 	 * op: what kind of operation it was; should always be "publish"<p>
@@ -70,10 +74,12 @@ public interface RosListenDelegate {
 				TypeReference<Map<String, Object>> listTypeRef =
 						new TypeReference<Map<String, Object>>() {};
 				messageData = objectMapper.readValue(jsonString, listTypeRef);
-			} catch (JsonParseException e) {
-				e.printStackTrace();
-			} catch (IOException e) {
-				e.printStackTrace();
+			} catch (final JsonParseException jsonParseException) {
+				LOGGER.error(ExceptionUtils.getStackTrace(jsonParseException));
+				throw new RuntimeException(jsonParseException);
+			} catch (IOException ioException) {
+				LOGGER.error(ExceptionUtils.getStackTrace(ioException));
+				throw new RuntimeException(ioException);
 			}
 
 			return messageData;
