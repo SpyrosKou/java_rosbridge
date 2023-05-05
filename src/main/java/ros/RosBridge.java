@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketConnect;
@@ -15,6 +16,7 @@ import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 import java.io.IOException;
 import java.io.StringWriter;
+import java.lang.invoke.MethodHandles;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A socket for connecting to ros bridge that accepts subscribe and publish commands.
@@ -254,8 +257,8 @@ public class RosBridge {
                 }
             }
         } catch (final IOException ioException) {
-            final String msg = "Could not parse ROSBridge web socket message into JSON data");
-            LOGGER.error(msg + " " + ExceptionUtils.getStacktrace(ioException));
+            final String errorMsg = "Could not parse ROSBridge web socket message into JSON data";
+            LOGGER.error(errorMsg + " " + ExceptionUtils.getStackTrace(ioException));
         }
 
 
@@ -331,7 +334,7 @@ public class RosBridge {
             fut.get(2, TimeUnit.SECONDS);
         } catch (final Throwable throwable) {
             final String msg = "Error in sending subscription message to Rosbridge host for topic " + topic;
-            LOGGER.error(msg + " " + ExceptionUtils.getStacktrace(throwable));
+            LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
         }
 
 
@@ -393,7 +396,7 @@ public class RosBridge {
             } catch (final Throwable throwable) {
                 this.publishedTopics.remove(topic);
                 final String msg = "Error in setting up advertisement to " + topic + " with message type: " + type;
-                LOGGER.error(msg + " " + ExceptionUtils.getStacktrace(throwable))
+                LOGGER.error(msg + " " + ExceptionUtils.getStackTrace(throwable));
             }
 
         }
