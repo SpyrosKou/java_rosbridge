@@ -21,7 +21,6 @@ import java.lang.invoke.MethodHandles;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import org.slf4j.Logger;
@@ -97,8 +96,8 @@ public class RosBridge {
      *
      * @param rosBridgeURI the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
      */
-    public void connect(final String rosBridgeURI) {
-        this.connect(rosBridgeURI, false);
+    public boolean connect(final String rosBridgeURI) {
+        return this.connect(rosBridgeURI, false);
     }
 
     /**
@@ -106,8 +105,10 @@ public class RosBridge {
      *
      * @param rosBridgeURI      the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
      * @param waitForConnection if true, then this method will block until the connection is established. If false, then return immediately.
+     * @deprecated a non blocking wait approach should be employed
      */
-    public void connect(String rosBridgeURI, boolean waitForConnection) {
+    @Deprecated
+    public boolean connect(String rosBridgeURI, boolean waitForConnection) {
         final WebSocketClient client = new WebSocketClient();
         try {
             client.start();
@@ -124,11 +125,16 @@ public class RosBridge {
                 this.waitForConnection();
             }
 
+
+        } catch (final org.eclipse.jetty.websocket.api.InvalidWebSocketException invalidWebSocketException) {
+            LOGGER.debug(ExceptionUtils.getStackTrace(invalidWebSocketException));
+
+
         } catch (final Throwable throwable) {
             LOGGER.error(ExceptionUtils.getStackTrace(throwable));
             throw new RuntimeException(throwable);
         }
-
+        return this.isConnected();
     }
 
     public RosBridge() {
@@ -137,9 +143,11 @@ public class RosBridge {
 
 
     /**
+     * @deprecated the whole thread will wait using this connection approach.
      * Blocks execution until a connection to the ros bridge server is established.
      */
-    public void waitForConnection() {
+    @Deprecated
+    public final void waitForConnection() {
 
         if (this.hasConnected) {
             return; //done
@@ -150,7 +158,7 @@ public class RosBridge {
                 try {
                     this.wait();
                 } catch (final InterruptedException interruptedException) {
-                    LOGGER.error(ExceptionUtils.getStackTrace(interruptedException));
+                    LOGGER.debug(ExceptionUtils.getStackTrace(interruptedException));
                 }
             }
         }
@@ -163,7 +171,7 @@ public class RosBridge {
      *
      * @return a boolean indicating whether the connection has been made
      */
-    public boolean hasConnected() {
+    public boolean isConnected() {
         return this.hasConnected;
     }
 
@@ -752,7 +760,7 @@ public class RosBridge {
             }
 
             final StringBuilder buf = new StringBuilder(fragments.get(0).length() * this.fragmentsNumber);
-            
+
             for (int i = 0; i < fragmentsNumber; i++) {
                 final String fragment = this.fragments.get(i);
                 buf.append(fragment);
