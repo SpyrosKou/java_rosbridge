@@ -18,11 +18,11 @@ package ros;
  * data field value is.
  * @author James MacGlashan.
  */
-public class Publisher {
+public final class Publisher {
 
-	protected String topic;
-	protected String msgType;
-	protected RosBridge rosBridge;
+	protected final String topic;
+	protected final String msgType;
+	protected final  RosBridge rosBridge;
 
 
 	/**
@@ -65,7 +65,7 @@ public class Publisher {
 	 * *need* to call this method since publishes will always make sure it was advertised first,
 	 * but gives you control if you did not have the topic advertised at constructions.
 	 */
-	public void advertise(){
+	public final void advertise(){
 		this.rosBridge.advertise(this.topic, this.msgType);
 	}
 
@@ -82,7 +82,7 @@ public class Publisher {
 	 * data field value is.
 	 * @param msg the message to publish.
 	 */
-	public void publish(Object msg){
+	public final void publish(Object msg){
 		this.rosBridge.publish(this.topic, this.msgType, msg);
 	}
 
@@ -92,7 +92,7 @@ public class Publisher {
 	 * If this client is not already advertising for this topic, it automatically will first.
 	 * @param jsonMsg the ROS message specified in a JSON string.
 	 */
-	public void publishJsonMsg(String jsonMsg){
+	public final  void publishJsonMsg(String jsonMsg){
 		this.rosBridge.publishJsonMsg(this.topic, this.msgType, jsonMsg);
 	}
 
@@ -101,7 +101,7 @@ public class Publisher {
 	 * Returns the topic topic to which this object publishes.
 	 * @return the topic topic to which this object publishes.
 	 */
-	public String getTopic() {
+	public final String getTopic() {
 		return topic;
 	}
 
@@ -110,7 +110,7 @@ public class Publisher {
 	 * Returns the ROS message type of the topic to which this object publishes.
 	 * @return the ROS message type of the topic to which this object publishes.
 	 */
-	public String getMsgType() {
+	public final String getMsgType() {
 		return msgType;
 	}
 
@@ -119,7 +119,7 @@ public class Publisher {
 	 * Returns the {@link ros.RosBridge} object that manages the connection to the ROS Bridge server.
 	 * @return the {@link ros.RosBridge} object that manages the connection to the ROS Bridge server.
 	 */
-	public RosBridge getRosBridge() {
+	public final RosBridge getRosBridge() {
 		return rosBridge;
 	}
 
@@ -127,7 +127,7 @@ public class Publisher {
 	/**
 	 * Unadvertises that you are publishing to the topic.
 	 */
-	public void unadvertise(){
+	public final void unadvertise(){
 		this.rosBridge.unadvertise(this.topic);
 	}
 }
