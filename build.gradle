@@ -10,7 +10,6 @@ plugins {
 }
 
 repositories {
-    mavenLocal()
     maven {
         url = uri('https://repo.maven.apache.org/maven2/')
     }
@@ -26,9 +25,9 @@ dependencies {
 }
 
 group = 'com.github.spyroskou'
-version = '2023.06.08.04'
+version = '2023.06.08.05'
 description = 'java_rosbridge'
-java.sourceCompatibility = JavaVersion.VERSION_17
+
 
 java {
     withSourcesJar()
