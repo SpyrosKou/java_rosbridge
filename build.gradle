@@ -26,7 +26,7 @@ dependencies {
 }
 
 group = 'com.github.spyroskou'
-version = '2023.06.08'
+version = '2023.06.08.04'
 description = 'java_rosbridge'
 java.sourceCompatibility = JavaVersion.VERSION_17
 
