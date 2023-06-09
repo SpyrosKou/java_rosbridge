@@ -17,15 +17,21 @@ repositories {
 
 dependencies {
     implementation 'org.eclipse.jetty.websocket:websocket-server:9.4.51.v20230217'
+    api 'org.eclipse.jetty.websocket:websocket-api:9.4.51.v20230217'
     implementation 'com.fasterxml.jackson.core:jackson-annotations:2.14.2'
     implementation 'com.fasterxml.jackson.core:jackson-core:2.14.2'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.14.2'
     implementation 'org.apache.commons:commons-lang3:3.12.0'
-    implementation 'org.slf4j:slf4j-api:2.0.5'
+    compileOnly 'org.slf4j:slf4j-api:2.0.5'
+    implementation 'com.google.guava:guava:32.0.0-jre'
+    testImplementation 'junit:junit:4.13.1'
+    testImplementation 'org.apache.logging.log4j:log4j-slf4j-impl:2.20.0'
+    testImplementation'org.apache.logging.log4j:log4j-core:2.20.0'
+
 }
 
-group = 'com.github.spyroskou'
-version = '2023.06.08.05'
+group = 'com.github.SpyrosKou'
+version = '2023.06.09'
 description = 'java_rosbridge'
 
 
