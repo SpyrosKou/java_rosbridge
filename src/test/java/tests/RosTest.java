@@ -25,11 +25,11 @@ public class RosTest {
     @Test
     public void test() {
         try {
-            final RosBridge bridge = new RosBridge();
-            {
-                final boolean connect = bridge.connect(DEFAULT_ROSBRIDGE_WEBSOCKET_URI);
-                Assert.assertTrue("Could not connect", connect);
-            }
+            final RosBridge bridge = new RosBridge(DEFAULT_ROSBRIDGE_WEBSOCKET_URI);
+
+            bridge.connect();
+
+
             {
                 final boolean waitForConnection = bridge.waitForConnection(30, TimeUnit.SECONDS);
                 Assert.assertTrue("Could not connect in time", waitForConnection);
@@ -75,8 +75,8 @@ public class RosTest {
             System.exit(0);
         }
 
-        final RosBridge bridge = new RosBridge();
-        bridge.connect(args[0]);
+        final RosBridge bridge = new RosBridge(args[0]);
+        bridge.connect();
         bridge.waitForConnection(30, TimeUnit.SECONDS);
 
         bridge.subscribe(SubscriptionRequestMsg.generate("/ros_to_java")
