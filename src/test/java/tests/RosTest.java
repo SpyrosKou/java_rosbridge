@@ -3,6 +3,7 @@ package tests;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Test;
 import ros.Publisher;
 import ros.RosBridge;
@@ -32,7 +33,7 @@ public class RosTest {
 
             {
                 final boolean waitForConnection = bridge.waitForConnection(30, TimeUnit.SECONDS);
-                Assert.assertTrue("Could not connect in time", waitForConnection);
+                Assume.assumeTrue("Could not connect in time, perhaps rosbridge is not online", waitForConnection);
             }
             {
                 final boolean isConnected = bridge.isConnected();
