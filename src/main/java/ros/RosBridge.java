@@ -802,7 +802,7 @@ public class RosBridge implements AutoCloseable {
     }
 
     final Set<String> getSubscribedTopics() {
-        return Collections.unmodifiableSet((this.listeners.keySet());
+        return Collections.unmodifiableSet((this.listeners.keySet()));
     }
 
 }
