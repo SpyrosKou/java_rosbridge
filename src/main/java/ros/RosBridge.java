@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose;
@@ -13,18 +15,18 @@ import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage;
 import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import org.eclipse.jetty.websocket.client.ClientUpgradeRequest;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.lang.invoke.MethodHandles;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReferenceArray;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A socket for connecting to ros bridge that accepts subscribe and publish commands.
@@ -41,9 +43,9 @@ import org.slf4j.LoggerFactory;
  * Publishing is also supported with the {@link #publish(String, String, Object)} method, but you should
  * consider using the {@link ros.Publisher} class wrapper for streamlining publishing.
  * <p>
- * To create and connect to rosbridge, you can either instantiate with the default constructor
- * and then call {@link #connect(String)} or use the static method {@link #createConnection(String)} which
- * creates a RosBridge instance and then connects.
+ * To create and connect to rosbridge, you can  instantiate with the default constructor
+ * and then call {@link #connect()}
+ * <p>
  * An example URI to provide as a parameter is: ws://localhost:9090, where 9090 is the default Rosbridge server port.
  * <p>
  * If you need to handle messages with larger sizes, you should subclass RosBridge and annotate the class
@@ -53,116 +55,114 @@ import org.slf4j.LoggerFactory;
  * {@literal @}WebSocket(maxTextMessageSize = 500 * 1024)  public class BigRosBridge extends RosBridge{  }
  * </code>
  * <p>
- * Note that the subclass does not need to override any methods; subclassing is performed purely to set the
+ * Note that the subclass cannot and does not need to override any methods; subclassing is performed purely to set the
  * buffer size in the annotation value. Then you can instantiate BigRosBridge and call its inherited connect method.
+ * This is designed to connect only once, if a new connection is needed it must be recreated.
  *
  * @author James MacGlashan.
  */
 @WebSocket
-public class RosBridge {
+public class RosBridge implements AutoCloseable {
+    private final WebSocketClient client = new WebSocketClient();
     private static final Logger LOGGER = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    protected final CountDownLatch closeLatch;
+    protected final CountDownLatch closeLatch = new CountDownLatch(INITIAL_COUNT);
+
+    private static final int INITIAL_COUNT = 1;
+
+    final URI rosBridgeURI;
+
+    private final CountDownLatch connectLatch = new CountDownLatch(INITIAL_COUNT);
+
+
     protected Session session;
 
-    protected Map<String, RosBridgeSubscriber> listeners = new ConcurrentHashMap<String, RosBridge.RosBridgeSubscriber>();
+    protected Map<String, RosBridgeSubscriber> listeners = new ConcurrentHashMap<>();
     protected Set<String> publishedTopics = new CopyOnWriteArraySet<>();
 
     protected Map<String, FragmentManager> fragmentManagers = new ConcurrentHashMap<>();
 
-    protected boolean hasConnected = false;
+    protected boolean isConnected = false;
 
-    protected boolean logMessagesAsReceived = false;
-
-
-    /**
-     * Creates a default RosBridge and connects it to the ROS Bridge websocket server located at rosBridgeURI.
-     * Note that it is recommend that you call the {@link #waitForConnection()} method
-     * before publishing or subscribing.
-     *
-     * @param rosBridgeURI the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
-     * @return the ROS Bridge socket that is connected to the indicated server.
-     */
-    public static RosBridge createConnection(String rosBridgeURI) {
-
-        final RosBridge socket = new RosBridge();
-        socket.connect(rosBridgeURI);
-        return socket;
-
-    }
-
+    private OptionalLong connectionTimeoutMillis = OptionalLong.empty();
 
     /**
-     * Connects to the Rosbridge host at the provided URI. Does not wait for connection.
-     *
      * @param rosBridgeURI the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
      */
-    public boolean connect(final String rosBridgeURI) {
-        return this.connect(rosBridgeURI, false);
-    }
-
-    /**
-     * Connects to the Rosbridge host at the provided URI.
-     *
-     * @param rosBridgeURI      the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
-     * @param waitForConnection if true, then this method will block until the connection is established. If false, then return immediately.
-     * @deprecated a non blocking wait approach should be employed
-     */
-    @Deprecated
-    public boolean connect(String rosBridgeURI, boolean waitForConnection) {
-        final WebSocketClient client = new WebSocketClient();
+    public RosBridge(final String rosBridgeURI) {
         try {
-            client.start();
-            final URI echoUri = new URI(rosBridgeURI);
+            this.rosBridgeURI = new URI(rosBridgeURI);
+        } catch (final URISyntaxException uriSyntaxException) {
+            throw new RuntimeException(uriSyntaxException);
+        }
+    }
+
+    public final OptionalLong getConnectionTimeoutMillis() {
+        return this.connectionTimeoutMillis;
+    }
+
+    public final void setConnectionTimeoutMillis(final long timeoutMillis) {
+        this.connectionTimeoutMillis = OptionalLong.of(timeoutMillis);
+    }
+
+    /**
+     * Starts connection to the Rosbridge host at the provided URI. Does not wait for connection.
+     */
+    public void connect() {
+
+
+        try {
+
+            this.client.start();
+
             final ClientUpgradeRequest request = new ClientUpgradeRequest();
-            client.connect(this, echoUri, request);
+            if (this.getConnectionTimeoutMillis().isPresent()) {
+                this.client.setConnectTimeout(this.getConnectionTimeoutMillis().getAsLong());
+            }
+
+
+            final Future<Session> futureSession = this.client.connect(this, this.rosBridgeURI, request);
+
 
             if (LOGGER.isTraceEnabled()) {
-                final String msg = String.format("Connecting to : %s%n", echoUri);
+                final String msg = String.format("Connecting to : %s%n", this.rosBridgeURI);
                 LOGGER.trace(msg);
             }
 
-            if (waitForConnection) {
-                this.waitForConnection();
-            }
 
-
-        } catch (final org.eclipse.jetty.websocket.api.InvalidWebSocketException invalidWebSocketException) {
+        } catch (
+                final org.eclipse.jetty.websocket.api.InvalidWebSocketException invalidWebSocketException) {
             LOGGER.debug(ExceptionUtils.getStackTrace(invalidWebSocketException));
+            throw new RuntimeException(invalidWebSocketException);
 
-
-        } catch (final Throwable throwable) {
+        } catch (
+                final Throwable throwable) {
             LOGGER.error(ExceptionUtils.getStackTrace(throwable));
             throw new RuntimeException(throwable);
         }
-        return this.isConnected();
-    }
 
-    public RosBridge() {
-        this.closeLatch = new CountDownLatch(1);
+
     }
 
 
     /**
-     * @deprecated the whole thread will wait using this connection approach.
-     * Blocks execution until a connection to the ros bridge server is established.
+     *
      */
-    @Deprecated
-    public final void waitForConnection() {
+    public final boolean waitForConnection() {
 
-        if (this.hasConnected) {
-            return; //done
+        if (this.isConnected()) {
+            return true;
         }
 
-        synchronized (this) {
-            while (!this.hasConnected) {
-                try {
-                    this.wait();
-                } catch (final InterruptedException interruptedException) {
-                    LOGGER.debug(ExceptionUtils.getStackTrace(interruptedException));
-                }
+
+        while (!this.isConnected) {
+            try {
+                this.connectLatch.await();
+            } catch (final InterruptedException interruptedException) {
+                LOGGER.debug(ExceptionUtils.getStackTrace(interruptedException));
             }
         }
 
+        return this.isConnected();
     }
 
 
@@ -171,41 +171,13 @@ public class RosBridge {
      *
      * @return a boolean indicating whether the connection has been made
      */
-    public boolean isConnected() {
-        return this.hasConnected;
+    public final boolean isConnected() {
+        return this.isConnected;
     }
 
 
     /**
-     * Returns whether ROSBridge will log all ROSBridge messages as they are received to the command line.
-     *
-     * @return if true, then ROSBridge will log all ROSBridge messages as they are received to the command line. Otherwise is silent.
-     */
-    public boolean logMessagesAsReceived() {
-        return logMessagesAsReceived;
-    }
-
-    /**
-     * Sets whether ROSBridge should log all ROSBridge messages as they are received to the command.
-     *
-     * @param logMessagesAsReceived if true, then ROSBridge will log all ROSBridge messages as they are received to the command line. Otherwise is silent.
-     */
-    public void setLogMessagesAsReceived(boolean logMessagesAsReceived) {
-        this.logMessagesAsReceived = logMessagesAsReceived;
-    }
-
-
-    /**
-     * Use this method to close the connection. Will automatically unsubscribe and unadvertise from all topics first.
-     * Call the {@link #awaitClose(int, TimeUnit)} method if you want to block a thread until closing has finished up.
-     */
-    public void closeConnection() {
-        this.unsubsribeUnAdvertiseAll();
-        this.session.close();
-    }
-
-    /**
-     * Use this to to wait for a connection to close, or a maximum amount of time.
+     * Use this  to wait for a connection to close, or a maximum amount of time.
      *
      * @param duration the time in some units until closing.
      * @param unit     the unit of time in which duration is measured.
@@ -213,12 +185,12 @@ public class RosBridge {
      * false if time ran out.
      * @throws InterruptedException
      */
-    public boolean awaitClose(int duration, TimeUnit unit) throws InterruptedException {
+    public final boolean awaitClose(final long duration, final TimeUnit unit) throws InterruptedException {
         return this.closeLatch.await(duration, unit);
     }
 
     @OnWebSocketClose
-    public void onClose(int statusCode, String reason) {
+    public final void onClose(int statusCode, String reason) {
 
         if (LOGGER.isTraceEnabled()) {
             final String msg = String.format("Connection closed: %d - %s%n", statusCode, reason);
@@ -229,6 +201,23 @@ public class RosBridge {
         this.closeLatch.countDown();
     }
 
+    /**
+     * @param timeout
+     * @param timeUnit
+     */
+    public final boolean waitForConnection(final long timeout, final TimeUnit timeUnit) {
+        Objects.requireNonNull(timeUnit);
+        final Stopwatch stopWatch = Stopwatch.createStarted();
+        while (!this.isConnected && stopWatch.elapsed(timeUnit) < timeout) {
+            try {
+                this.connectLatch.await(timeout - stopWatch.elapsed(timeUnit), timeUnit);
+            } catch (final InterruptedException interruptedException) {
+                LOGGER.debug(ExceptionUtils.getStackTrace(interruptedException));
+            }
+        }
+        return this.isConnected();
+    }
+
     @OnWebSocketConnect
     public void onConnect(Session session) {
         if (LOGGER.isTraceEnabled()) {
@@ -236,19 +225,15 @@ public class RosBridge {
             LOGGER.trace(msg);
         }
         this.session = session;
-        this.hasConnected = true;
-        synchronized (this) {
-            this.notifyAll();
-        }
-
+        this.isConnected = true;
+        this.connectLatch.countDown();
     }
 
     @OnWebSocketMessage
     public void onMessage(String msg) {
 
-        if (this.logMessagesAsReceived && LOGGER.isDebugEnabled()) {
-
-            LOGGER.debug(msg);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Received msg:" + msg);
         }
 
         ObjectMapper mapper = new ObjectMapper();
@@ -664,6 +649,36 @@ public class RosBridge {
     }
 
     /**
+     * Use this method to close the connection. Will automatically unsubscribe and unadvertise from all topics first.
+     * Call the {@link #awaitClose(int, TimeUnit)} method if you want to block a thread until closing has finished up.
+     * Does not throw any exception
+     */
+    @Override
+    public final void close() {
+        try {
+            this.unsubsribeUnAdvertiseAll();
+        } catch (final Exception ignoreException) {
+        }
+        try {
+            if (this.session != null) {
+                this.session.close();
+                this.session = null;
+            }
+
+        } catch (final Exception ignoreException) {
+        }
+        try {
+            this.client.stop();
+        } catch (final Exception ignoreException) {
+        }
+        try {
+            this.client.destroy();
+        } catch (final Exception ignoreException) {
+        }
+
+    }
+
+    /**
      * Class for managing all the listeners that have subscribed to a topic on Rosbridge.
      * Maintains a list of {@link RosListenDelegate} objects and informs them all
      * when a message has been received from Rosbridge.
@@ -780,6 +795,14 @@ public class RosBridge {
                 LOGGER.debug(ExceptionUtils.getStackTrace(exception));
             }
         }
+    }
+
+    final Set<String> getPublishedTopics() {
+        return Set.copyOf(this.publishedTopics);
+    }
+
+    final Set<String> getSubscribedTopics() {
+        return Set.copyOf(this.listeners.keySet());
     }
 
 }
