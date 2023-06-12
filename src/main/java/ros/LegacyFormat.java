@@ -38,7 +38,7 @@ public final class LegacyFormat {
 
         try {
             final ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
-            final TypeReference<Map<String, Object>> listTypeRef = new TypeReference<>() {
+            final TypeReference<Map<String, Object>> listTypeRef = new TypeReference<Map<String, Object>>() {
             };
             final Map<String, Object> messageData = objectMapper.readValue(jsonString, listTypeRef);
             return messageData;
