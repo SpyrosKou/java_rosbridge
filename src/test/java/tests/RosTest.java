@@ -26,7 +26,7 @@ public class RosTest {
     @Test
     public void test() {
         try {
-            final RosBridge bridge = new RosBridge(DEFAULT_ROSBRIDGE_WEBSOCKET_URI);
+            final RosBridge bridge = RosBridge.create(DEFAULT_ROSBRIDGE_WEBSOCKET_URI);
 
             bridge.connect();
 
@@ -46,7 +46,7 @@ public class RosTest {
                             .setQueueLength(1),
                     new RosListenDelegate() {
 
-                        public final void receive(JsonNode data, String stringRep) {
+                        public final void accept(JsonNode data, String stringRep) {
                             MessageUnpacker<PrimitiveMsg<String>> unpacker = new MessageUnpacker<PrimitiveMsg<String>>(PrimitiveMsg.class);
                             PrimitiveMsg<String> msg = unpacker.unpackRosMessage(data);
                             System.out.println(msg.data);
@@ -76,7 +76,7 @@ public class RosTest {
             System.exit(0);
         }
 
-        final RosBridge bridge = new RosBridge(args[0]);
+        final RosBridge bridge = RosBridge.create(args[0]);
         bridge.connect();
         bridge.waitForConnection(30, TimeUnit.SECONDS);
 
@@ -86,7 +86,7 @@ public class RosTest {
                         .setQueueLength(1),
                 new RosListenDelegate() {
 
-                    public final void receive(JsonNode data, String stringRep) {
+                    public final void accept(JsonNode data, String stringRep) {
                         MessageUnpacker<PrimitiveMsg<String>> unpacker = new MessageUnpacker<PrimitiveMsg<String>>(PrimitiveMsg.class);
                         PrimitiveMsg<String> msg = unpacker.unpackRosMessage(data);
                         System.out.println(msg.data);

@@ -44,7 +44,7 @@ public class MessageUnpacker <T> {
 	 * ros bridge. Note that the Ros bridge JSON message contains header information and the actual
 	 * ROS message is stored in the 'msg' field in the JSON message. Therefore, this method should be provided the
 	 * {@link com.fasterxml.jackson.databind.JsonNode} that is given to a {@link ros.RosListenDelegate}
-	 * {@link ros.RosListenDelegate#receive(com.fasterxml.jackson.databind.JsonNode, String)} method.
+	 * {@link ros.RosListenDelegate#accept(com.fasterxml.jackson.databind.JsonNode, String)} method.
 	 * If the provided {@link com.fasterxml.jackson.databind.JsonNode} argument of this method
 	 * does not have a "msg" field, then it will attempt to unpack from the whole JSON node.
 	 * @param rosBridgeMessage the {@link com.fasterxml.jackson.databind.JsonNode} from RosBridge.
