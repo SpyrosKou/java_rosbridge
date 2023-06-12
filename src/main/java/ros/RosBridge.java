@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.eclipse.jetty.websocket.api.Session;
@@ -27,6 +26,7 @@ import java.net.URISyntaxException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.BiConsumer;
 
 /**
  * A socket for connecting to ros bridge that accepts subscribe and publish commands.
@@ -48,52 +48,70 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  * <p>
  * An example URI to provide as a parameter is: ws://localhost:9090, where 9090 is the default Rosbridge server port.
  * <p>
- * If you need to handle messages with larger sizes, you should subclass RosBridge and annotate the class
- * with {@link WebSocket} with the parameter maxTextMessageSize set to the desired buffer size. For example:
- * <p>
- * <code>
- * {@literal @}WebSocket(maxTextMessageSize = 500 * 1024)  public class BigRosBridge extends RosBridge{  }
- * </code>
- * <p>
- * Note that the subclass cannot and does not need to override any methods; subclassing is performed purely to set the
- * buffer size in the annotation value. Then you can instantiate BigRosBridge and call its inherited connect method.
- * This is designed to connect only once, if a new connection is needed it must be recreated.
+ * If you need to handle messages with larger sizes, you should use the {@link RosBridge#RosBridge(String, int)} constructor and specify
+ * the parameter maxTextMessageSize  to the desired buffer size.
+ *
+ * This is designed to connect only once, if a new connection is needed a new class instance must be recreated.
  *
  * @author James MacGlashan.
  */
 @WebSocket
 public class RosBridge implements AutoCloseable {
-    private final WebSocketClient client = new WebSocketClient();
+    private final WebSocketClient client;
     private static final Logger LOGGER = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    protected final CountDownLatch closeLatch = new CountDownLatch(INITIAL_COUNT);
+    private final CountDownLatch closeLatch = new CountDownLatch(INITIAL_COUNT);
+   public static RosBridge create(final String rosBridgeURI) {
+        return new RosBridge(rosBridgeURI);
+    }
+
+    public static RosBridge create(final String rosBridgeURI,final int maxTextMessageBufferSize) {
+        return new RosBridge(rosBridgeURI,maxTextMessageBufferSize);
+    }
 
     private static final int INITIAL_COUNT = 1;
 
-    final URI rosBridgeURI;
+    private final URI rosBridgeURI;
 
     private final CountDownLatch connectLatch = new CountDownLatch(INITIAL_COUNT);
 
 
-    protected Session session;
+    private Session session;
 
-    protected Map<String, RosBridgeSubscriber> listeners = new ConcurrentHashMap<>();
-    protected Set<String> publishedTopics = new CopyOnWriteArraySet<>();
+    private Map<String, RosBridgeSubscriber> listeners = new ConcurrentHashMap<>();
+    private Set<String> publishedTopics = new CopyOnWriteArraySet<>();
 
-    protected Map<String, FragmentManager> fragmentManagers = new ConcurrentHashMap<>();
+    private Map<String, FragmentManager> fragmentManagers = new ConcurrentHashMap<>();
 
-    protected boolean isConnected = false;
+    private boolean isConnected = false;
 
     private OptionalLong connectionTimeoutMillis = OptionalLong.empty();
 
     /**
      * @param rosBridgeURI the URI to the ROS Bridge websocket server. Note that ROS Bridge by default uses port 9090. An example URI is: ws://localhost:9090
      */
-    public RosBridge(final String rosBridgeURI) {
+    protected RosBridge(final String rosBridgeURI) {
         try {
             this.rosBridgeURI = new URI(rosBridgeURI);
         } catch (final URISyntaxException uriSyntaxException) {
             throw new RuntimeException(uriSyntaxException);
         }
+        this.client = new WebSocketClient();
+
+    }
+
+    /**
+     *
+     * @param rosBridgeURI
+     * @param maxTextMessageBufferSize
+     */
+    protected RosBridge(final String rosBridgeURI,final int maxTextMessageBufferSize) {
+        try {
+            this.rosBridgeURI = new URI(rosBridgeURI);
+        } catch (final URISyntaxException uriSyntaxException) {
+            throw new RuntimeException(uriSyntaxException);
+        }
+        this.client = new WebSocketClient();
+        this.client.setMaxTextMessageBufferSize(maxTextMessageBufferSize);
     }
 
     public final OptionalLong getConnectionTimeoutMillis() {
@@ -107,7 +125,7 @@ public class RosBridge implements AutoCloseable {
     /**
      * Starts connection to the Rosbridge host at the provided URI. Does not wait for connection.
      */
-    public void connect() {
+    public final void connect() {
 
 
         try {
@@ -190,7 +208,7 @@ public class RosBridge implements AutoCloseable {
     }
 
     @OnWebSocketClose
-    public final void onClose(int statusCode, String reason) {
+    public void onClose(int statusCode, String reason) {
 
         if (LOGGER.isTraceEnabled()) {
             final String msg = String.format("Connection closed: %d - %s%n", statusCode, reason);
@@ -271,7 +289,7 @@ public class RosBridge implements AutoCloseable {
      * @param type     the message type of the topic. Pass null for type inference.
      * @param delegate the delegate that receives updates to the topic
      */
-    public void subscribe(String topic, String type, RosListenDelegate delegate) {
+    public final void subscribe(final String topic,final String type,final BiConsumer<JsonNode,String> delegate) {
         this.subscribe(SubscriptionRequestMsg.generate(topic).setType(type), delegate);
     }
 
@@ -304,7 +322,7 @@ public class RosBridge implements AutoCloseable {
      * @param request  the subscription request details.
      * @param delegate the delegate that will receive messages each time a message is published to the topic.
      */
-    public void subscribe(SubscriptionRequestMsg request, RosListenDelegate delegate) {
+    public final void subscribe(final SubscriptionRequestMsg request,final BiConsumer<JsonNode,String> delegate) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot subscribe.");
@@ -345,7 +363,7 @@ public class RosBridge implements AutoCloseable {
      * @param topic    the topic on which the listener subscribed.
      * @param delegate the delegate to remove.
      */
-    public void removeListener(String topic, RosListenDelegate delegate) {
+    public final void removeListener(String topic, RosListenDelegate delegate) {
 
         final RosBridgeSubscriber subscriber = this.listeners.get(topic);
         if (subscriber != null) {
@@ -366,7 +384,7 @@ public class RosBridge implements AutoCloseable {
      * @param topic the topic to which this object will be publishing.
      * @param type  the ROS message type of the topic.
      */
-    public void advertise(String topic, String type) {
+    public final void advertise(String topic, String type) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot advertise topic: " + topic);
@@ -409,7 +427,7 @@ public class RosBridge implements AutoCloseable {
      *
      * @param topic the topic from which to unsubscribe.
      */
-    public void unsubscribe(String topic) {
+    public final void unsubscribe(String topic) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot unsubscribe. Attempted unsubscribe topic: " + topic);
@@ -435,7 +453,7 @@ public class RosBridge implements AutoCloseable {
     /**
      * Unsubscribes from all topics.
      */
-    public void unsubscribeAll() {
+    public final void unsubscribeAll() {
         final List<String> curTopics = new ArrayList<String>(this.listeners.keySet());
         for (final String topic : curTopics) {
             this.unsubscribe(topic);
@@ -478,7 +496,7 @@ public class RosBridge implements AutoCloseable {
     /**
      * Unadvertises for all topics currently being published to.
      */
-    public void unadvertiseAll() {
+    public final void unadvertiseAll() {
         List<String> curPublishedTopics;
         synchronized (this.publishedTopics) {
             curPublishedTopics = new ArrayList<String>(this.publishedTopics);
@@ -503,7 +521,7 @@ public class RosBridge implements AutoCloseable {
      * @param type  the message type of the topic
      * @param msg   should be a {@link java.util.Map} or a Java Bean, specifying the ROS message
      */
-    public void publish(String topic, String type, Object msg) {
+    public final void publish(String topic, String type, Object msg) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot publish. Attempted Topic Publish: " + topic);
@@ -552,7 +570,7 @@ public class RosBridge implements AutoCloseable {
      * @param type    the message type of the topic
      * @param jsonMsg the JSON string of the ROS message.
      */
-    public void publishJsonMsg(String topic, String type, String jsonMsg) {
+    public final void publishJsonMsg(String topic, String type, String jsonMsg) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot publish. Attempted Topic Publish: " + topic);
@@ -582,7 +600,7 @@ public class RosBridge implements AutoCloseable {
      *
      * @param message the message to send to Rosbridge.
      */
-    public void sendRawMessage(String message) {
+    public final void sendRawMessage(String message) {
 
         if (this.session == null) {
             throw new RuntimeException("Rosbridge connection is closed. Cannot send message.");
@@ -606,7 +624,7 @@ public class RosBridge implements AutoCloseable {
      *
      * @param o the object to turn into a JSON message and send.
      */
-    public void formatAndSend(Object o) {
+    public final  void formatAndSend(Object o) {
 
         final JsonFactory jsonFactory = new JsonFactory();
         final StringWriter writer = new StringWriter();
@@ -636,7 +654,7 @@ public class RosBridge implements AutoCloseable {
     }
 
 
-    protected void processFragment(final JsonNode node) {
+    private final void processFragment(final JsonNode node) {
         final String id = node.get("id").textValue();
         final FragmentManager manager = this.fragmentManagers.computeIfAbsent(id, key -> new FragmentManager(node));
         final boolean complete = manager.updateFragment(node);
@@ -683,9 +701,9 @@ public class RosBridge implements AutoCloseable {
      * Maintains a list of {@link RosListenDelegate} objects and informs them all
      * when a message has been received from Rosbridge.
      */
-    public static class RosBridgeSubscriber {
+    public static final class RosBridgeSubscriber {
 
-        protected List<RosListenDelegate> delegates = new CopyOnWriteArrayList<RosListenDelegate>();
+        private List<BiConsumer<JsonNode,String>> delegates = new CopyOnWriteArrayList<>();
 
         public RosBridgeSubscriber() {
         }
@@ -695,8 +713,8 @@ public class RosBridge implements AutoCloseable {
          *
          * @param delegates the delegates to receive messages.
          */
-        public RosBridgeSubscriber(RosListenDelegate... delegates) {
-            for (RosListenDelegate delegate : delegates) {
+        public RosBridgeSubscriber(final BiConsumer<JsonNode,String>... delegates) {
+            for (final BiConsumer<JsonNode,String> delegate : delegates) {
                 this.delegates.add(delegate);
             }
         }
@@ -706,7 +724,7 @@ public class RosBridge implements AutoCloseable {
          *
          * @param delegate a delegate to receive messages from Rosbridge.
          */
-        public void addDelegate(RosListenDelegate delegate) {
+        public final void addDelegate(final BiConsumer<JsonNode,String> delegate) {
             this.delegates.add(delegate);
         }
 
@@ -716,7 +734,7 @@ public class RosBridge implements AutoCloseable {
          *
          * @param delegate the delegate to stop receiving messages.
          */
-        public void removeDelegate(RosListenDelegate delegate) {
+        public final void removeDelegate(final BiConsumer<JsonNode,String> delegate) {
             this.delegates.remove(delegate);
         }
 
@@ -726,9 +744,9 @@ public class RosBridge implements AutoCloseable {
          * @param data      the {@link com.fasterxml.jackson.databind.JsonNode} containing the JSON data received.
          * @param stringRep the string representation of the JSON object.
          */
-        public void receive(JsonNode data, String stringRep) {
-            for (RosListenDelegate delegate : delegates) {
-                delegate.receive(data, stringRep);
+        public final void receive(JsonNode data, String stringRep) {
+            for (final BiConsumer<JsonNode,String> delegate : delegates) {
+                delegate.accept(data, stringRep);
             }
         }
 
@@ -737,7 +755,7 @@ public class RosBridge implements AutoCloseable {
          *
          * @return the number of delegates listening to this topic.
          */
-        public int numDelegates() {
+        public final  int numDelegates() {
             return this.delegates.size();
         }
 
@@ -797,11 +815,11 @@ public class RosBridge implements AutoCloseable {
         }
     }
 
-    final Set<String> getPublishedTopics() {
+    public final Set<String> getPublishedTopics() {
         return Collections.unmodifiableSet(this.publishedTopics);
     }
 
-    final Set<String> getSubscribedTopics() {
+    public final Set<String> getSubscribedTopics() {
         return Collections.unmodifiableSet((this.listeners.keySet()));
     }
 
