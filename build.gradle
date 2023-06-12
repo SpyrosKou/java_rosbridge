@@ -31,7 +31,7 @@ dependencies {
 }
 
 group = 'com.github.SpyrosKou'
-version = '2023.06.12.01'
+version = '2023.06.12.02'
 description = 'java_rosbridge'
 
 
